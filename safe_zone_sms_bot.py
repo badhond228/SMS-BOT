@@ -236,9 +236,9 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
     safe_code = html.escape(code if code else "No code found")
 
     text = (
-        f"<b>📞  Number:</b> <code>{hidden_number}</code>\n\n"
-        f"<b>🌍  Country:</b> {country_info}\n\n"
-        f"<b>📡  Service:</b> {safe_service}\n\n\n"
+        f"<b>📞  Number:</b> <code>{hidden_number}</code>\n\"
+        f"<b>🌍  Country:</b> {country_info}\n\"
+        f"<b>📡  Service:</b> {safe_service}\n\n\"
         f"<b>🗝️  Code:</b> "
         f"<code>{safe_code}</code>"
     )
