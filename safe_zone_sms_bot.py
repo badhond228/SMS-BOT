@@ -2,14 +2,18 @@ import os
 import re
 import html
 import json
+import time
+import queue
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, Set, Tuple, List
 
 import requests
 import phonenumbers
 import pycountry
+from flask import Flask
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.error import NetworkError, TimedOut
@@ -21,17 +25,12 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0"))
 
-# Example CR_APIS_JSON:
-# [
-#   {"name":"API-1","token":"TOKEN_1","url":"http://1.1.1.1/crapi/had/viewstats"},
-#   {"name":"API-2","token":"TOKEN_2","url":"http://2.2.2.2/crapi/had/viewstats"}
-# ]
 CR_APIS_JSON = os.getenv("CR_APIS_JSON", "[]")
 
-CHANNEL_1_NAME = os.getenv("CHANNEL_1_NAME", "Channel 1")
+CHANNEL_1_NAME = os.getenv("CHANNEL_1_NAME", "NUMBER")
 CHANNEL_1_URL = os.getenv("CHANNEL_1_URL", "https://t.me/your_channel_1")
 
-CHANNEL_2_NAME = os.getenv("CHANNEL_2_NAME", "Channel 2")
+CHANNEL_2_NAME = os.getenv("CHANNEL_2_NAME", "CHANNEL")
 CHANNEL_2_URL = os.getenv("CHANNEL_2_URL", "https://t.me/your_channel_2")
 
 TIMEOUT = int(os.getenv("TIMEOUT", "20"))
@@ -39,6 +38,8 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "10"))
 DEFAULT_FETCH_RECORDS = int(os.getenv("DEFAULT_FETCH_RECORDS", "20"))
 SEEN_DB_FILE = os.getenv("SEEN_DB_FILE", "seen_records.json")
 MAX_SEEN_RECORDS = int(os.getenv("MAX_SEEN_RECORDS", "10000"))
+
+PORT = int(os.getenv("PORT", "10000"))
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -67,7 +68,6 @@ def load_cr_apis() -> List[Dict[str, str]]:
 
 
 CR_APIS = load_cr_apis()
-
 
 # =========================
 # FILE STORAGE
@@ -105,7 +105,6 @@ def save_seen_records(seen: Set[str]) -> None:
 
 
 seen_records: Set[str] = load_seen_records()
-
 
 # =========================
 # HELPERS
@@ -191,7 +190,6 @@ def get_country_info(number: str) -> str:
 
     return "🌍 Unknown"
 
-
 # =========================
 # CODE DETECTION
 # =========================
@@ -225,7 +223,6 @@ def extract_code(message: str) -> str:
 
     return ""
 
-
 # =========================
 # FORMAT MESSAGE
 # =========================
@@ -246,12 +243,15 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
         f"<b>Number:</b> <code>{hidden_number}</code>\n"
         f"<b>Country:</b> {country_info}\n"
         f"<b>Service:</b> {safe_service}\n\n"
-        f"<b>Code:</b> "
+        f"<b>Message:</b>\n{safe_message}\n\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"<b>Code:</b>\n"
         f"<code>{safe_code}</code>"
     )
 
     keyboard = InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton(text="Code", callback_data=f"showcode|{code if code else 'No code found'}")],
             [
                 InlineKeyboardButton(CHANNEL_1_NAME, url=CHANNEL_1_URL),
                 InlineKeyboardButton(CHANNEL_2_NAME, url=CHANNEL_2_URL),
@@ -349,61 +349,36 @@ async def process_all_apis_and_send(app: Application) -> None:
 
 
 # =========================
-# BACKGROUND LOOP
+# TELEGRAM BOT LOOP
 # =========================
-async def auto_fetch_loop(app: Application) -> None:
-    await asyncio.sleep(5)
-
-    while True:
-        try:
-            await process_all_apis_and_send(app)
-        except Exception:
-            logger.exception("Auto fetch loop crashed but recovered")
-
-        await asyncio.sleep(CHECK_INTERVAL)
-
-
-async def post_init(app: Application) -> None:
-    asyncio.create_task(auto_fetch_loop(app))
-    logger.info("Auto fetch loop started.")
-
-
-# =========================
-# TELEGRAM RUNNER
-# =========================
-def validate_config() -> None:
-    if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN set korun.")
-    if not GROUP_CHAT_ID:
-        raise ValueError("GROUP_CHAT_ID set korun.")
-    if not CR_APIS:
-        raise ValueError("CR_APIS_JSON set korun.")
-
-
-async def run_bot_forever() -> None:
+async def bot_runner() -> None:
     while True:
         application = None
         try:
-            validate_config()
+            if not BOT_TOKEN:
+                raise ValueError("BOT_TOKEN set korun.")
+            if not GROUP_CHAT_ID:
+                raise ValueError("GROUP_CHAT_ID set korun.")
+            if not CR_APIS:
+                raise ValueError("CR_APIS_JSON set korun.")
 
-            application = (
-                Application.builder()
-                .token(BOT_TOKEN)
-                .post_init(post_init)
-                .build()
-            )
-
+            application = Application.builder().token(BOT_TOKEN).build()
             application.add_handler(
                 CallbackQueryHandler(show_code_callback, pattern=r"^showcode\|")
             )
 
-            logger.info("Bot starting...")
             await application.initialize()
             await application.start()
             await application.updater.start_polling(drop_pending_updates=True)
 
+            logger.info("Telegram bot started.")
+
             while True:
-                await asyncio.sleep(60)
+                try:
+                    await process_all_apis_and_send(application)
+                except Exception:
+                    logger.exception("Auto fetch loop crashed but recovered")
+                await asyncio.sleep(CHECK_INTERVAL)
 
         except (NetworkError, TimedOut) as exc:
             logger.error("Telegram network error, reconnecting: %s", exc)
@@ -420,22 +395,45 @@ async def run_bot_forever() -> None:
                         await application.updater.stop()
                 except Exception:
                     pass
-
                 try:
                     if application.running:
                         await application.stop()
                 except Exception:
                     pass
-
                 try:
                     await application.shutdown()
                 except Exception:
                     pass
 
 
-def main() -> None:
-    asyncio.run(run_bot_forever())
+def start_bot_thread() -> None:
+    def runner():
+        asyncio.run(bot_runner())
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
 
 
+# =========================
+# FLASK WEB SERVER
+# =========================
+web_app = Flask(__name__)
+
+
+@web_app.route("/")
+def home():
+    return "SMS Bot is running", 200
+
+
+@web_app.route("/health")
+def health():
+    return {"status": "ok"}, 200
+
+
+# =========================
+# MAIN
+# =========================
 if __name__ == "__main__":
-    main()
+    start_bot_thread()
+    logger.info("Starting web server on port %s", PORT)
+    web_app.run(host="0.0.0.0", port=PORT)
