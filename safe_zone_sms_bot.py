@@ -236,21 +236,15 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
     safe_code = html.escape(code if code else "No code found")
 
     text = (
-        f"<b>Number:</b> <code>{hidden_number}</code>\n"
-        f"<b>Country:</b> {country_info}\n"
-        f"<b>Service:</b> {safe_service}\n\n"
-        f"<b>Code:</b> "
+        f"<b>📞 Number:</b> <code>{hidden_number}</code>\n"
+        f"<b>🌍 Country:</b> {country_info}\n"
+        f"<b>📡Service:</b> {safe_service}\n\n"
+        f"<b>🗝️ Code:</b> "
         f"<code>{safe_code}</code>"
     )
 
     keyboard = InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    text="Code",
-                    callback_data=f"showcode|{code if code else 'No code found'}"
-                )
-            ],
             [
                 InlineKeyboardButton(CHANNEL_1_NAME, url=CHANNEL_1_URL),
                 InlineKeyboardButton(CHANNEL_2_NAME, url=CHANNEL_2_URL),
