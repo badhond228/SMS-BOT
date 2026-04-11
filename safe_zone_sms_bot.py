@@ -3,7 +3,6 @@ import re
 import html
 import json
 import time
-import queue
 import asyncio
 import logging
 import threading
@@ -13,7 +12,7 @@ from typing import Dict, Set, Tuple, List
 import requests
 import phonenumbers
 import pycountry
-from flask import Flask
+from flask import Flask, jsonify
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.error import NetworkError, TimedOut
@@ -25,49 +24,46 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0"))
 
-CR_APIS_JSON = os.getenv("CR_APIS_JSON", "[]")
-
 CHANNEL_1_NAME = os.getenv("CHANNEL_1_NAME", "NUMBER")
 CHANNEL_1_URL = os.getenv("CHANNEL_1_URL", "https://t.me/your_channel_1")
 
 CHANNEL_2_NAME = os.getenv("CHANNEL_2_NAME", "CHANNEL")
 CHANNEL_2_URL = os.getenv("CHANNEL_2_URL", "https://t.me/your_channel_2")
 
-TIMEOUT = int(os.getenv("TIMEOUT", "20"))
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "10"))
-DEFAULT_FETCH_RECORDS = int(os.getenv("DEFAULT_FETCH_RECORDS", "20"))
-SEEN_DB_FILE = os.getenv("SEEN_DB_FILE", "seen_records.json")
-MAX_SEEN_RECORDS = int(os.getenv("MAX_SEEN_RECORDS", "10000"))
-
 PORT = int(os.getenv("PORT", "10000"))
+
+TIMEOUT = 20
+CHECK_INTERVAL = 10
+DEFAULT_FETCH_RECORDS = 20
+SEEN_DB_FILE = "seen_records.json"
+MAX_SEEN_RECORDS = 10000
+
+# =========================
+# API LIST HERE
+# =========================
+CR_APIS = [
+    {
+        "name": "API-1",
+        "token": "Sk9XRTRSQlWEi1R-a4BSi0OLUoZYZlGGen9TdX2LjUJrUmd6ZoFQ",
+        "url": "http://147.135.212.197/crapi/had/viewstats",
+    },
+    # {
+    #     "name": "API-2",
+    #     "token": "YOUR_CR_TOKEN_2",
+    #     "url": "http://YOUR_SERVER_2/crapi/had/viewstats",
+    # },
+    # {
+    #     "name": "API-3",
+    #     "token": "YOUR_CR_TOKEN_3",
+    #     "url": "http://YOUR_SERVER_3/crapi/had/viewstats",
+    # },
+]
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger("safe_zone_sms_bot")
-
-
-def load_cr_apis() -> List[Dict[str, str]]:
-    try:
-        data = json.loads(CR_APIS_JSON)
-        if isinstance(data, list):
-            valid = []
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name", "API")).strip()
-                token = str(item.get("token", "")).strip()
-                url = str(item.get("url", "")).strip()
-                if token and url:
-                    valid.append({"name": name, "token": token, "url": url})
-            return valid
-    except Exception as exc:
-        logger.error("CR_APIS_JSON parse error: %s", exc)
-    return []
-
-
-CR_APIS = load_cr_apis()
 
 # =========================
 # FILE STORAGE
@@ -243,15 +239,18 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
         f"<b>Number:</b> <code>{hidden_number}</code>\n"
         f"<b>Country:</b> {country_info}\n"
         f"<b>Service:</b> {safe_service}\n\n"
-        f"<b>Message:</b>\n{safe_message}\n\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"<b>Code:</b>\n"
+        f"<b>Code:</b> "
         f"<code>{safe_code}</code>"
     )
 
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(text="Code", callback_data=f"showcode|{code if code else 'No code found'}")],
+            [
+                InlineKeyboardButton(
+                    text="Code",
+                    callback_data=f"showcode|{code if code else 'No code found'}"
+                )
+            ],
             [
                 InlineKeyboardButton(CHANNEL_1_NAME, url=CHANNEL_1_URL),
                 InlineKeyboardButton(CHANNEL_2_NAME, url=CHANNEL_2_URL),
@@ -360,7 +359,7 @@ async def bot_runner() -> None:
             if not GROUP_CHAT_ID:
                 raise ValueError("GROUP_CHAT_ID set korun.")
             if not CR_APIS:
-                raise ValueError("CR_APIS_JSON set korun.")
+                raise ValueError("CR_APIS list e API add korun.")
 
             application = Application.builder().token(BOT_TOKEN).build()
             application.add_handler(
@@ -415,7 +414,7 @@ def start_bot_thread() -> None:
 
 
 # =========================
-# FLASK WEB SERVER
+# KEEP ALIVE WEB SERVER
 # =========================
 web_app = Flask(__name__)
 
@@ -427,7 +426,7 @@ def home():
 
 @web_app.route("/health")
 def health():
-    return {"status": "ok"}, 200
+    return jsonify({"status": "ok"}), 200
 
 
 # =========================
@@ -435,5 +434,5 @@ def health():
 # =========================
 if __name__ == "__main__":
     start_bot_thread()
-    logger.info("Starting web server on port %s", PORT)
+    logger.info("Starting keep alive web server on port %s", PORT)
     web_app.run(host="0.0.0.0", port=PORT)
