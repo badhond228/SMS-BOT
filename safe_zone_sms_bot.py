@@ -43,20 +43,20 @@ MAX_SEEN_RECORDS = 10000
 # =========================
 CR_APIS = [
     {
-        "name": "API-1",
+        "name": "Hadi",
         "token": "Sk9XRTRSQlWEi1R-a4BSi0OLUoZYZlGGen9TdX2LjUJrUmd6ZoFQ",
         "url": "http://147.135.212.197/crapi/had/viewstats",
     },
-    # {
-    #     "name": "API-2",
-    #     "token": "YOUR_CR_TOKEN_2",
-    #     "url": "http://YOUR_SERVER_2/crapi/had/viewstats",
-    # },
-    # {
-    #     "name": "API-3",
-    #     "token": "YOUR_CR_TOKEN_3",
-    #     "url": "http://YOUR_SERVER_3/crapi/had/viewstats",
-    # },
+     {
+         "name": "Lamix",
+         "token": "RFBVQ0pBUzR5i2yBf2dsXmmNkWJGgXFceohuZ1Nuh2JpZnJWX26SVg==",
+         "url": "http://51.77.216.195/crapi/lamix/viewstats",
+     },
+     {
+         "name": "Zone",
+         "token": "QVdPRkNVfklBUQ==",
+         "url": "http://137.74.1.203/zonecr/reseller/mdr.php",
+     },
 ]
 
 logging.basicConfig(
