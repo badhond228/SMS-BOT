@@ -66,6 +66,11 @@ CR_APIS = [
          "token": "RVdURzRSQklcYFRaYWRWRUqVd0F2Ym9fW4CTYFlwhHVliGiAfIRP",
          "url": "http://51.77.216.195/crapi/konek/viewstats",
      },
+    {
+         "name": "iprn",
+         "token": "Michub333&number=",
+         "url": "https://premium.ikangoo.com/api/access-data-psms.php",
+     },
 ]
 
 logging.basicConfig(
