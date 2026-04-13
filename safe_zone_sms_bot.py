@@ -56,6 +56,16 @@ CR_APIS = [
          "token": "QVdPRkNVfklBUQ==",
          "url": "http://137.74.1.203/zonecr/reseller/mdr.php",
      },
+    {
+         "name": "pscall",
+         "token": "SFNURD1SS4NyiFBCQ1A=",
+         "url": "https://pscall.net/restapi/smsreport",
+     },
+    {
+         "name": "Konekta",
+         "token": "RVdURzRSQklcYFRaYWRWRUqVd0F2Ym9fW4CTYFlwhHVliGiAfIRP",
+         "url": "http://51.77.216.195/crapi/konek/viewstats",
+     },
 ]
 
 logging.basicConfig(
