@@ -2,12 +2,11 @@ import os
 import re
 import html
 import json
-import time
 import asyncio
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Set, Tuple, List
+from typing import Dict, Set, Tuple
 
 import requests
 import phonenumbers
@@ -189,31 +188,43 @@ def get_country_info(number: str) -> str:
 # =========================
 # CODE DETECTION
 # =========================
-CODE_PATTERNS = [
-    re.compile(r"\b([A-Za-z0-9]{4,20})\b(?=\s+is\s+your\s+[\w\s.\-]*code\b)", re.I),
-    re.compile(r"\b(?:your\s+)?[\w\s.\-]*code\s+is\s+([A-Za-z0-9]{4,20})\b", re.I),
-    re.compile(r"\b(?:otp|pin|passcode)\b[\s:;\-]*([A-Za-z0-9]{4,20})\b", re.I),
-    re.compile(r"\bverification\s+code\b[\s:;\-]*([A-Za-z0-9]{4,20})\b", re.I),
-    re.compile(r"\b(?:facebook|instagram|google|whatsapp|telegram|discord|twitter|x)\s+code\b[\s:;\-]*([A-Za-z0-9]{4,20})\b", re.I),
-    re.compile(r"\bcode\b[\s:;\-]*([A-Za-z0-9]{4,20})\b", re.I),
-]
-FALLBACK_DIGIT_PATTERN = re.compile(r"\b(\d{4,8})\b")
-
-
 def extract_code(message: str) -> str:
+    """
+    Supported examples:
+    - 123456 is your WhatsApp code
+    - 123-456 is your WhatsApp code
+    - Your WhatsApp code is 123456
+    - WhatsApp code 123456
+    - # 36446 is your Facebook code LaznxCarLW  -> 36446
+    - OTP: 482991
+    - verification code ABCD1234
+    """
+
     if not message:
         return ""
 
     text = str(message).strip()
 
-    for pattern in CODE_PATTERNS:
-        match = pattern.search(text)
+    patterns = [
+        r"\b([A-Za-z0-9\-]{4,20})\b(?=\s+is\s+your\s+[\w\s.\-]*code\b)",
+        r"\b(?:your\s+)?[\w\s.\-]*code\s+is\s+([A-Za-z0-9\-]{4,20})\b",
+        r"\b(?:facebook|instagram|google|whatsapp|telegram|discord|twitter|x)\s+code\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+        r"\botp\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+        r"\bpin\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+        r"\bpasscode\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+        r"\bverification\s+code\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+        r"\bcode\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             code = match.group(1).strip()
             if code:
                 return code
 
-    fallback = FALLBACK_DIGIT_PATTERN.search(text)
+    # Fallback: short numeric code
+    fallback = re.search(r"\b(\d{4,8})\b", text)
     if fallback:
         return fallback.group(1)
 
@@ -236,21 +247,37 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
     safe_code = html.escape(code if code else "No code found")
 
     text = (
-        f"<b>📞  Number:</b> <code>{hidden_number}</code>\n"
-        f"<b>🌍  Country:</b> {country_info}\n"
-        f"<b>📡  Service:</b> {safe_service}\n\n"
-        f"<b>🗝️  Code:</b> "
-        f"<code>{safe_code}</code>"
-    )
+    f"<b>📞 Number:</b> <b><code>{hidden_number}</code></b>\n"
+    f"<b>🌍 Country:</b> <b>{country_info}</b>\n"
+    f"<b>📡 Service:</b> <b>{safe_service}</b>\n\n"
+    f"<b>🗝️ Code:</b>\n"
+    f"<b><code>{safe_code}</code></b>"
+)
 
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(CHANNEL_1_NAME, url=CHANNEL_1_URL),
-                InlineKeyboardButton(CHANNEL_2_NAME, url=CHANNEL_2_URL),
-            ],
-        ]
-    )
+    keyboard_rows = []
+
+    channel_buttons = []
+
+    if CHANNEL_1_NAME.strip() and CHANNEL_1_URL.strip():
+        channel_buttons.append(
+            InlineKeyboardButton(
+                text=CHANNEL_1_NAME.strip(),
+                url=CHANNEL_1_URL.strip()
+            )
+        )
+
+    if CHANNEL_2_NAME.strip() and CHANNEL_2_URL.strip():
+        channel_buttons.append(
+            InlineKeyboardButton(
+                text=CHANNEL_2_NAME.strip(),
+                url=CHANNEL_2_URL.strip()
+            )
+        )
+
+    if channel_buttons:
+        keyboard_rows.append(channel_buttons)
+
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
     return text, keyboard
 
 
