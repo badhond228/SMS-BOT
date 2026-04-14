@@ -70,7 +70,7 @@ CR_APIS = [
          "name": "iprn",
          "token": "Michub333&number=",
          "url": "https://premium.ikangoo.com/api/access-data-psms.php",
-     },,
+     },
 ]
 
 logging.basicConfig(
