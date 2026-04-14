@@ -6,7 +6,7 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Set, Tuple
+from typing import Dict, Set, Tuple, List
 
 import requests
 import phonenumbers
@@ -23,11 +23,11 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0"))
 
-CHANNEL_1_NAME = os.getenv("CHANNEL_1_NAME", "NUMBER")
-CHANNEL_1_URL = os.getenv("CHANNEL_1_URL", "https://t.me/your_channel_1")
+CHANNEL_1_NAME = os.getenv("CHANNEL_1_NAME", "NUMBER").strip()
+CHANNEL_1_URL = os.getenv("CHANNEL_1_URL", "https://t.me/your_channel_1").strip()
 
-CHANNEL_2_NAME = os.getenv("CHANNEL_2_NAME", "CHANNEL")
-CHANNEL_2_URL = os.getenv("CHANNEL_2_URL", "https://t.me/your_channel_2")
+CHANNEL_2_NAME = os.getenv("CHANNEL_2_NAME", "CHANNEL").strip()
+CHANNEL_2_URL = os.getenv("CHANNEL_2_URL", "https://t.me/your_channel_2").strip()
 
 PORT = int(os.getenv("PORT", "10000"))
 
@@ -70,7 +70,7 @@ CR_APIS = [
          "name": "iprn",
          "token": "Michub333&number=",
          "url": "https://premium.ikangoo.com/api/access-data-psms.php",
-     },
+     },,
 ]
 
 logging.basicConfig(
@@ -203,45 +203,88 @@ def get_country_info(number: str) -> str:
 # =========================
 # CODE DETECTION
 # =========================
+APP_NAMES_PATTERN = (
+    r"facebook|instagram|google|whatsapp|telegram|discord|twitter|x|"
+    r"viber|imo|signal|wechat|line|snapchat|tiktok|kakao|messenger|gmail|"
+    r"linkedin|yahoo|amazon|microsoft|apple|uber|bolt|airbnb|paypal"
+)
+
+
+def is_valid_numeric_code(raw_code: str) -> bool:
+    if not raw_code:
+        return False
+
+    code = raw_code.strip()
+
+    # শুধু digit / hyphen / space allow
+    for ch in code:
+        if not (ch.isdigit() or ch in "- "):
+            return False
+
+    # malformed separator reject
+    if "--" in code or "  " in code:
+        return False
+
+    digits_only = "".join(ch for ch in code if ch.isdigit())
+
+    # মোট digit 4-8 এর মধ্যে হতে হবে
+    if len(digits_only) < 4 or len(digits_only) > 8:
+        return False
+
+    return True
+
+
 def extract_code(message: str) -> str:
     """
-    Supported examples:
-    - 123456 is your WhatsApp code
-    - 123-456 is your WhatsApp code
-    - Your WhatsApp code is 123456
-    - WhatsApp code 123456
-    - # 36446 is your Facebook code LaznxCarLW  -> 36446
-    - OTP: 482991
-    - verification code ABCD1234
-    """
+    Examples accepted:
+    - # Your Viber code 420838 Getting this message by mistake
+      -> 420838
 
+    - 123456 is your WhatsApp code
+      -> 123456
+
+    - 123-456 is your WhatsApp code
+      -> 123-456
+
+    - Your Facebook code is 654321
+      -> 654321
+
+    Examples rejected:
+    - 420838nGetting
+    - 276-287-727
+    - abc123
+    - 123456789
+    """
     if not message:
         return ""
 
     text = str(message).strip()
 
     patterns = [
-        r"\b([A-Za-z0-9\-]{4,20})\b(?=\s+is\s+your\s+[\w\s.\-]*code\b)",
-        r"\b(?:your\s+)?[\w\s.\-]*code\s+is\s+([A-Za-z0-9\-]{4,20})\b",
-        r"\b(?:facebook|instagram|google|whatsapp|telegram|discord|twitter|x)\s+code\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
-        r"\botp\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
-        r"\bpin\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
-        r"\bpasscode\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
-        r"\bverification\s+code\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
-        r"\bcode\b[\s:;\-]*([A-Za-z0-9\-]{4,20})\b",
+        rf"\b(\d[\d\- ]{{2,12}}\d)\b(?=\s+is\s+your\s+(?:{APP_NAMES_PATTERN}|[\w\s.\-]+)\s+code\b)",
+        rf"\b(?:your\s+)?(?:{APP_NAMES_PATTERN}|[\w\s.\-]+)\s+code\s+is\s+(\d[\d\- ]{{2,12}}\d)\b",
+        rf"\b(?:{APP_NAMES_PATTERN})\s+code\b[\s:;\-]*(\d[\d\- ]{{2,12}}\d)\b",
+        r"\bcode\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+        r"\botp\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+        r"\bpin\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+        r"\bpasscode\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+        r"\bverification\s+code\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
     ]
 
+    # 1) App/code patterns first
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            code = match.group(1).strip()
-            if code:
-                return code
+            candidate = match.group(1).strip()
+            if is_valid_numeric_code(candidate):
+                return candidate
 
-    # Fallback: short numeric code
-    fallback = re.search(r"\b(\d{4,8})\b", text)
-    if fallback:
-        return fallback.group(1)
+    # 2) Fallback standalone numeric code
+    fallback_matches = re.findall(r"\b\d[\d\- ]{2,12}\d\b", text)
+    for candidate in fallback_matches:
+        candidate = candidate.strip()
+        if is_valid_numeric_code(candidate):
+            return candidate
 
     return ""
 
@@ -258,34 +301,33 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
     code = extract_code(str(message))
 
     safe_service = html.escape(str(service))
-    safe_message = html.escape(str(message))
-    safe_code = html.escape(code if code else "No code found")
+    safe_code = html.escape(code if code else "")
 
     text = (
-    f"<b>☎️ Number:</b> <b><code>{hidden_number}</code></b>\n"
-    f"<b>🌍 Country:</b> <b>{country_info}</b>\n"
-    f"<b>⚙ Service:</b> <b>{safe_service}</b>\n\n"
-    f"<b>🔑 Code:</b> "
-    f"<b><code>{safe_code}</code></b>"
-)
+        f"<b>☎️ Number:</b> <b>{hidden_number}</b>\n"
+        f"<b>🌍 Country:</b> <b>{country_info}</b>\n"
+        f"<b>⚙ Service:</b> <b>{safe_service}</b>\n\n"
+        f"<b>🔑 Code:</b> <b>{safe_code}</b>"
+    )
 
-    keyboard_rows = []
+    keyboard_rows = [
+    ]
 
     channel_buttons = []
 
-    if CHANNEL_1_NAME.strip() and CHANNEL_1_URL.strip():
+    if CHANNEL_1_NAME and CHANNEL_1_URL:
         channel_buttons.append(
             InlineKeyboardButton(
-                text=CHANNEL_1_NAME.strip(),
-                url=CHANNEL_1_URL.strip()
+                text=CHANNEL_1_NAME,
+                url=CHANNEL_1_URL
             )
         )
 
-    if CHANNEL_2_NAME.strip() and CHANNEL_2_URL.strip():
+    if CHANNEL_2_NAME and CHANNEL_2_URL:
         channel_buttons.append(
             InlineKeyboardButton(
-                text=CHANNEL_2_NAME.strip(),
-                url=CHANNEL_2_URL.strip()
+                text=CHANNEL_2_NAME,
+                url=CHANNEL_2_URL
             )
         )
 
@@ -358,6 +400,7 @@ async def process_all_apis_and_send(app: Application) -> None:
 
                 seen_records.add(record_id)
 
+                # code না থাকলে send করবে না
                 if not code:
                     continue
 
