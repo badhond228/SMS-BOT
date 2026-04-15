@@ -6,16 +6,16 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Set, Tuple, List
+from typing import Dict, Set, Tuple
 
 import requests
 import phonenumbers
 import pycountry
 from flask import Flask, jsonify
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, CopyTextButton
 from telegram.error import NetworkError, TimedOut
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application
 
 # =========================
 # ENV / CONFIG
@@ -216,40 +216,34 @@ def is_valid_numeric_code(raw_code: str) -> bool:
 
     code = raw_code.strip()
 
-    # শুধু digit / hyphen / space allow
     for ch in code:
         if not (ch.isdigit() or ch in "- "):
             return False
 
-    # malformed separator reject
     if "--" in code or "  " in code:
         return False
 
     digits_only = "".join(ch for ch in code if ch.isdigit())
 
-    # মোট digit 4-8 এর মধ্যে হতে হবে
     if len(digits_only) < 4 or len(digits_only) > 8:
         return False
 
     return True
 
 
+def normalize_spaces(code: str) -> str:
+    return re.sub(r"\s+", " ", code.strip())
+
+
 def extract_code(message: str) -> str:
     """
-    Examples accepted:
-    - # Your Viber code 420838 Getting this message by mistake
-      -> 420838
+    Accept:
+    - # Your Viber code 420838 Getting this message by mistake -> 420838
+    - 123456 is your WhatsApp code -> 123456
+    - 123-456 is your WhatsApp code -> 123-456
+    - Your Facebook code is 654321 -> 654321
 
-    - 123456 is your WhatsApp code
-      -> 123456
-
-    - 123-456 is your WhatsApp code
-      -> 123-456
-
-    - Your Facebook code is 654321
-      -> 654321
-
-    Examples rejected:
+    Reject:
     - 420838nGetting
     - 276-287-727
     - abc123
@@ -262,27 +256,33 @@ def extract_code(message: str) -> str:
 
     patterns = [
         rf"\b(\d[\d\- ]{{2,12}}\d)\b(?=\s+is\s+your\s+(?:{APP_NAMES_PATTERN}|[\w\s.\-]+)\s+code\b)",
+
         rf"\b(?:your\s+)?(?:{APP_NAMES_PATTERN}|[\w\s.\-]+)\s+code\s+is\s+(\d[\d\- ]{{2,12}}\d)\b",
+
         rf"\b(?:{APP_NAMES_PATTERN})\s+code\b[\s:;\-]*(\d[\d\- ]{{2,12}}\d)\b",
+
         r"\bcode\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+
         r"\botp\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+
         r"\bpin\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+
         r"\bpasscode\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
+
         r"\bverification\s+code\b[\s:;\-]*(\d[\d\- ]{2,12}\d)\b",
     ]
 
-    # 1) App/code patterns first
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            candidate = match.group(1).strip()
+            candidate = normalize_spaces(match.group(1))
             if is_valid_numeric_code(candidate):
                 return candidate
 
-    # 2) Fallback standalone numeric code
+    # fallback standalone numeric-looking chunks
     fallback_matches = re.findall(r"\b\d[\d\- ]{2,12}\d\b", text)
     for candidate in fallback_matches:
-        candidate = candidate.strip()
+        candidate = normalize_spaces(candidate)
         if is_valid_numeric_code(candidate):
             return candidate
 
@@ -301,17 +301,23 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
     code = extract_code(str(message))
 
     safe_service = html.escape(str(service))
-    safe_code = html.escape(code if code else "")
 
     text = (
-        f"<b>☎️ Number:</b> <b>{hidden_number}</b>\n"
-        f"<b>🌍 Country:</b> <b>{country_info}</b>\n"
-        f"<b>⚙ Service:</b> <b>{safe_service}</b>\n\n"
-        f"<b>🔑 Code:</b> <b>{safe_code}</b>"
+        f"<b>☎️ Number:</b> <b>{html.escape(hidden_number)}</b>\n"
+        f"<b>🌍 Country:</b> <b>{html.escape(country_info)}</b>\n"
+        f"<b>⚙ Service:</b> <b>{safe_service}</b>"
     )
 
-    keyboard_rows = [
-    ]
+    keyboard_rows = []
+
+    # Direct copy button
+    if code:
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=f"🔐 {code}",
+                copy_text=CopyTextButton(text=code)
+            )
+        ])
 
     channel_buttons = []
 
@@ -336,28 +342,6 @@ def format_single_item(item: Dict) -> Tuple[str, InlineKeyboardMarkup]:
 
     keyboard = InlineKeyboardMarkup(keyboard_rows)
     return text, keyboard
-
-
-# =========================
-# BUTTON HANDLER
-# =========================
-async def show_code_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if not query:
-        return
-
-    message = query.message
-    if not message or message.chat.id != GROUP_CHAT_ID:
-        await query.answer()
-        return
-
-    data = query.data or ""
-    if data.startswith("showcode|"):
-        code = data.split("|", 1)[1]
-        await query.answer(text=code, show_alert=True)
-        return
-
-    await query.answer()
 
 
 # =========================
@@ -400,7 +384,7 @@ async def process_all_apis_and_send(app: Application) -> None:
 
                 seen_records.add(record_id)
 
-                # code না থাকলে send করবে না
+                # send only when valid code exists
                 if not code:
                     continue
 
@@ -441,9 +425,6 @@ async def bot_runner() -> None:
                 raise ValueError("CR_APIS list e API add korun.")
 
             application = Application.builder().token(BOT_TOKEN).build()
-            application.add_handler(
-                CallbackQueryHandler(show_code_callback, pattern=r"^showcode\|")
-            )
 
             await application.initialize()
             await application.start()
